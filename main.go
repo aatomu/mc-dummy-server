@@ -61,7 +61,7 @@ func main() {
 					nameLen, _ := readVarInt(buf)
 					name := make([]byte, nameLen)
 					buf.Read(name)
-					log.Printf("Login: %s", name)
+					log.Printf("Exec: \"Login\"  MCID: %s", name)
 
 					data := fmt.Sprintf(`[{"text":"Hi! %s\n","color":"gold"},{"text":"Access IP: %s\n","color":"gray"},{"text":"Address: %s\n","color":"gray"},{"text":"You can't log in to this server.","color":"green"}]`, name, conn.RemoteAddr().String(), accessDomain)
 					dataLen := writeVarInt(len(data))
@@ -77,7 +77,7 @@ func main() {
 				buf.Read(portData)
 				port := binary.BigEndian.Uint16(portData)
 				nextState, _ := readVarInt(buf)
-				log.Printf("Status Protocol: %d, Address: %s:%d Next: %d", protocolVer, address, port, nextState)
+				log.Printf("Exec: \"Status\"  Protocol: %d, Address: %s:%d, Next: %d", protocolVer, address, port, nextState)
 				accessDomain = fmt.Sprintf("%s:%d", address, port)
 				if nextState == 2 {
 					isLogin = true
@@ -93,7 +93,7 @@ func main() {
 			if packetId == 1 && dataLen > 0 {
 				payload := make([]byte, dataLen)
 				buf.Read(payload)
-				log.Printf("Status Ping: %d", payload)
+				log.Printf("Exec:\"Status Ping\"  Payload: %d", payload)
 				conn.Write(newResponse(1, payload))
 			}
 		}
