@@ -4,19 +4,50 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"strings"
 	"time"
 )
 
 const segmentBit int = 0x7f
 const continueBit int = 0x80
 
+type MinecraftServer struct {
+	Version     ServerVersion    `json:"version"`
+	Players     ServerPlayers    `json:"players"`
+	Description []map[string]any `json:"description"`
+	// 64x64px png image & base64encoded!!
+	// Favicon:"data:image/png;base64,<data>"
+	Favicon            string `json:"favicon"`
+	EnforcesSecureChat bool   `json:"enforcesSecureChat"`
+}
+
+type ServerVersion struct {
+	Name     string `json:"name"`
+	Protocol int    `json:"protocol"`
+}
+
+type ServerPlayers struct {
+	Max    int            `json:"max"`
+	Online int            `json:"online"`
+	Sample []ServerPlayer `json:"sample"`
+}
+
+type ServerPlayer struct {
+	Name string `json:"name"`
+	Id   string `json:"id"`
+}
+
+type LoginFailedReason []map[string]any
+
 var (
 	port = flag.Int("port", 25565, "Listen Port")
+	id   = 0
 )
 
 func main() {
@@ -26,76 +57,112 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	log.Println(strings.Repeat("=", 20), "Listener booted", strings.Repeat("=", 20))
 	for {
 		conn, err := server.Accept()
 		if err != nil {
 			break
 		}
+		id++
+		go NewSession(conn, id)
+	}
+}
 
-		reader := bufio.NewReader(conn)
+func NewSession(conn net.Conn, id int) {
+	reader := bufio.NewReader(conn)
 
-		var isLogin bool = false
-		var accessDomain = ""
-		for {
-			fmt.Println("=======================================")
-			length, _ := readVarInt(reader)
-			if length == 0 {
-				log.Println("Close Connection")
-				break
-			}
+	var isLogin bool = false
+	var accessDomain = ""
 
-			data := make([]byte, length)
-			reader.Read(data)
+	log.Printf("No%04d: State:\"New connection\" IP:%s", id, conn.RemoteAddr().String())
+	for {
+		length, _ := readVarInt(reader)
+		if length == 0 {
+			log.Printf("No%04d: State:\"Close session\"", id)
+			break
+		}
 
-			buf := bytes.NewReader(data)
-			packetId, packetIdLen := readVarInt(buf)
+		data := make([]byte, length)
+		reader.Read(data)
 
-			dataLen := length - packetIdLen
-			if dataLen == 0 {
-				continue
-			}
-			fmt.Println("Data", data[1:])
-			// Status
-			if packetId == 0 && dataLen > 0 {
-				if isLogin {
-					nameLen, _ := readVarInt(buf)
-					name := make([]byte, nameLen)
-					buf.Read(name)
-					log.Printf("Exec: \"Login\"  MCID: %s", name)
+		buf := bytes.NewReader(data)
+		packetId, packetIdLen := readVarInt(buf)
 
-					data := fmt.Sprintf(`[{"text":"Hi! %s\n","color":"gold"},{"text":"Access IP: %s\n","color":"gray"},{"text":"Address: %s\n","color":"gray"},{"text":"You can't log in to this server.","color":"green"}]`, name, conn.RemoteAddr().String(), accessDomain)
-					dataLen := writeVarInt(len(data))
-					conn.Write(newResponse(0x00, append(dataLen, data...)))
-					continue
+		dataLen := length - packetIdLen
+		if dataLen == 0 {
+			continue
+		}
+
+		// Status
+		if packetId == 0 && dataLen > 0 {
+			if isLogin {
+				nameLen, _ := readVarInt(buf)
+				name := make([]byte, nameLen)
+				buf.Read(name)
+				log.Printf("No%04d: State:\"Login\" MCID:\"%s\" AccessDomain:\"%s\" Raw:%v", id, name, accessDomain, data[1:])
+
+				reason := LoginFailedReason{
+					{"text": fmt.Sprintf("Hi! %s\n", name), "color": "gold"},
+					{"text": fmt.Sprintf("Access IP: %s\n", conn.RemoteAddr().String()), "color": "gray"},
+					{"text": fmt.Sprintf("Address: %s\n", accessDomain), "color": "gray"},
+					{"text": "You can't login to this server.", "color": "green"},
 				}
-
-				protocolVer, _ := readVarInt(buf)
-				addressLen, _ := readVarInt(buf)
-				address := make([]byte, addressLen)
-				buf.Read(address)
-				portData := make([]byte, 2)
-				buf.Read(portData)
-				port := binary.BigEndian.Uint16(portData)
-				nextState, _ := readVarInt(buf)
-				log.Printf("Exec: \"Status\"  Protocol: %d, Address: %s:%d, Next: %d", protocolVer, address, port, nextState)
-				accessDomain = fmt.Sprintf("%s:%d", address, port)
-				if nextState == 2 {
-					isLogin = true
-					continue
-				}
-
-				data := fmt.Sprintf(`{"version":{"name":"Why looking here?","protocol":%d},"players":{"max":0,"online":-21263,"sample":[{"name":"aatomu","id":"c52fafa6-e223-4bdd-b884-b39f641a4cf4"}]},"description":[{"text":"SERVER","color":"gold","bold":true},{"text":" "},{"text":"IS","color":"red","bold":true},{"text":" "},{"text":"SERVER\n","color":"blue","bold":true},{"text":"Time: %s"}]}`, protocolVer, time.Now().Format("2006-01-02T15:04:05.00 UTC-07:00"))
+				data, _ := json.Marshal(reason)
 				dataLen := writeVarInt(len(data))
-				conn.Write(newResponse(0, append(dataLen, data...)))
+				conn.Write(newResponse(0x00, append(dataLen, data...)))
 				continue
 			}
-			// Status Ping
-			if packetId == 1 && dataLen > 0 {
-				payload := make([]byte, dataLen)
-				buf.Read(payload)
-				log.Printf("Exec:\"Status Ping\"  Payload: %d", payload)
-				conn.Write(newResponse(1, payload))
+
+			protocolVer, _ := readVarInt(buf)
+			addressLen, _ := readVarInt(buf)
+			address := make([]byte, addressLen)
+			buf.Read(address)
+			portData := make([]byte, 2)
+			buf.Read(portData)
+			port := binary.BigEndian.Uint16(portData)
+			nextState, _ := readVarInt(buf)
+			log.Printf("No%04d: State:\"Handshake\" Protocol:%d Address:\"%s:%d\" Next:%d Raw:%v", id, protocolVer, address, port, nextState, data[1:])
+			accessDomain = fmt.Sprintf("%s:%d", address, port)
+			if nextState == 2 {
+				isLogin = true
+				continue
 			}
+
+			status := MinecraftServer{
+				Version: ServerVersion{
+					Name:     "Why looking here?",
+					Protocol: protocolVer,
+				},
+				Players: ServerPlayers{
+					Max:    0,
+					Online: -21263,
+					Sample: []ServerPlayer{
+						{
+							Name: "aatomu",
+							Id:   "c52fafa6-e223-4bdd-b884-b39f641a4cf4",
+						},
+					},
+				},
+				Description: []map[string]any{
+					{"text": "SERVER", "color": "gold", "bold": true},
+					{"text": " "},
+					{"text": "IS", "color": "red", "bold": true},
+					{"text": " "},
+					{"text": "SERVER\n", "color": "blue", "bold": true},
+					{"text": fmt.Sprintf("Time: %s", time.Now().Format("2006-01-02T15:04:05.00 UTC-07:00"))},
+				},
+			}
+			data, _ := json.Marshal(status)
+			dataLen := writeVarInt(len(data))
+			conn.Write(newResponse(0, append(dataLen, data...)))
+			continue
+		}
+		// Status Ping
+		if packetId == 1 && dataLen > 0 {
+			payload := make([]byte, dataLen)
+			buf.Read(payload)
+			log.Printf("No%04d: State:\"Status\" Payload:%v Raw:%v", id, payload, data[1:])
+			conn.Write(newResponse(1, payload))
 		}
 	}
 }
