@@ -161,7 +161,7 @@ func NewSession(conn net.Conn, id int) {
 		if packetId == 1 && dataLen > 0 {
 			payload := make([]byte, dataLen)
 			buf.Read(payload)
-			log.Printf("No%04d: State:\"Status\" Payload:%v Raw:%v", id, payload, data[1:])
+			log.Printf("No%04d: State:\"Ping\" Payload:%v Raw:%v", id, payload, data[1:])
 			conn.Write(newResponse(1, payload))
 		}
 	}
