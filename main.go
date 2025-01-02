@@ -130,7 +130,7 @@ func NewSession(conn net.Conn, id int) {
 
 			status := MinecraftServer{
 				Version: ServerVersion{
-					Name:     "Why looking here?",
+					Name:     "How to looking here?",
 					Protocol: protocolVer,
 				},
 				Players: ServerPlayers{
