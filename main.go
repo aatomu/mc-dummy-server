@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"time"
 )
@@ -152,6 +154,19 @@ func NewSession(conn net.Conn, id int) {
 					{"text": fmt.Sprintf("Time: %s", time.Now().Format("2006-01-02T15:04:05.00 UTC-07:00"))},
 				},
 			}
+
+			func() {
+				_, err := os.Stat("./icon.png")
+				if err == nil {
+					img, err := os.ReadFile("./icon.png")
+					if err != nil {
+						return
+					}
+
+					base := base64.StdEncoding.EncodeToString(img)
+					status.Favicon = fmt.Sprintf("data:image/png;base64,%s", base)
+				}
+			}()
 			data, _ := json.Marshal(status)
 			dataLen := writeVarInt(len(data))
 			conn.Write(newResponse(0, append(dataLen, data...)))
