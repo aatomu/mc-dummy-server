@@ -218,8 +218,7 @@ func writeVarInt(value int) []byte {
 func newResponse(packetId int, data []byte) []byte {
 	response := []byte{}
 	id := writeVarInt(packetId)
-	idLen := writeVarInt(len(id))
-	response = append(response, writeVarInt(len(idLen)+len(data))...)
+	response = append(response, writeVarInt(len(id)+len(data))...)
 	response = append(response, id...)
 	response = append(response, data...)
 	return response
