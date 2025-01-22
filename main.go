@@ -47,6 +47,14 @@ type ServerPlayer struct {
 
 type LoginFailedReason []map[string]any
 
+type NextState int
+
+const (
+	Handshake NextState = iota
+	Status
+	Login
+)
+
 var (
 	port = flag.Int("port", 25565, "Listen Port")
 	id   = 0
@@ -73,8 +81,9 @@ func main() {
 func NewSession(conn net.Conn, id int) {
 	reader := bufio.NewReader(conn)
 
-	var isLogin bool = false
+	var next = Handshake
 	var accessDomain = ""
+	var protocolVer = 0
 
 	log.Printf("No%04d: State:\"New connection\" IP:%s", id, conn.RemoteAddr().String())
 	for {
@@ -95,27 +104,10 @@ func NewSession(conn net.Conn, id int) {
 			continue
 		}
 
-		// Status
-		if packetId == 0 && dataLen > 0 {
-			if isLogin {
-				nameLen, _ := readVarInt(buf)
-				name := make([]byte, nameLen)
-				buf.Read(name)
-				log.Printf("No%04d: State:\"Login\" MCID:\"%s\" AccessDomain:\"%s\" Raw:%v", id, name, accessDomain, data[1:])
-
-				reason := LoginFailedReason{
-					{"text": fmt.Sprintf("Hi! %s\n", name), "color": "gold"},
-					{"text": fmt.Sprintf("Access IP: %s\n", conn.RemoteAddr().String()), "color": "gray"},
-					{"text": fmt.Sprintf("Address: %s\n", accessDomain), "color": "gray"},
-					{"text": "You can't login to this server.", "color": "green"},
-				}
-				data, _ := json.Marshal(reason)
-				dataLen := writeVarInt(len(data))
-				conn.Write(newResponse(0x00, append(dataLen, data...)))
-				continue
-			}
-
-			protocolVer, _ := readVarInt(buf)
+		log.Println(packetId, dataLen, next)
+		// Handshake
+		if packetId == 0 && dataLen > 0 && next == Handshake {
+			protocolVer, _ = readVarInt(buf)
 			addressLen, _ := readVarInt(buf)
 			address := make([]byte, addressLen)
 			buf.Read(address)
@@ -125,9 +117,11 @@ func NewSession(conn net.Conn, id int) {
 			nextState, _ := readVarInt(buf)
 			log.Printf("No%04d: State:\"Handshake\" Protocol:%d Address:\"%s:%d\" Next:%d Raw:%v", id, protocolVer, address, port, nextState, data[1:])
 			accessDomain = fmt.Sprintf("%s:%d", address, port)
-			if nextState == 2 {
-				isLogin = true
-				continue
+			switch nextState {
+			case 1:
+				next = Status
+			case 2:
+				next = Login
 			}
 
 			status := MinecraftServer{
@@ -172,7 +166,73 @@ func NewSession(conn net.Conn, id int) {
 			conn.Write(newResponse(0, append(dataLen, data...)))
 			continue
 		}
-		// Status Ping
+
+		// Status Request
+		if packetId == 0 && dataLen == 0 && next == Status {
+			log.Printf("No%04d: State:\"Status request\"", id)
+
+			status := MinecraftServer{
+				Version: ServerVersion{
+					Name:     "How to looking here?",
+					Protocol: protocolVer,
+				},
+				Players: ServerPlayers{
+					Max:    0,
+					Online: -21263,
+					Sample: []ServerPlayer{
+						{
+							Name: "aatomu",
+							Id:   "c52fafa6-e223-4bdd-b884-b39f641a4cf4",
+						},
+					},
+				},
+				Description: []map[string]any{
+					{"text": "SERVER", "color": "gold", "bold": true},
+					{"text": " "},
+					{"text": "IS", "color": "red", "bold": true},
+					{"text": " "},
+					{"text": "SERVER\n", "color": "blue", "bold": true},
+					{"text": fmt.Sprintf("Time: %s", time.Now().Format("2006-01-02T15:04:05.00 UTC-07:00"))},
+				},
+			}
+
+			func() {
+				_, err := os.Stat("./icon.png")
+				if err == nil {
+					img, err := os.ReadFile("./icon.png")
+					if err != nil {
+						return
+					}
+
+					base := base64.StdEncoding.EncodeToString(img)
+					status.Favicon = fmt.Sprintf("data:image/png;base64,%s", base)
+				}
+			}()
+			data, _ := json.Marshal(status)
+			dataLen := writeVarInt(len(data))
+			conn.Write(newResponse(0, append(dataLen, data...)))
+			continue
+		}
+		// Login Request
+		if packetId == 0 && dataLen > 0 && next == Login {
+			nameLen, _ := readVarInt(buf)
+			name := make([]byte, nameLen)
+			buf.Read(name)
+			log.Printf("No%04d: State:\"Login\" MCID:\"%s\" AccessDomain:\"%s\" Raw:%v", id, name, accessDomain, data[1:])
+
+			reason := LoginFailedReason{
+				{"text": fmt.Sprintf("Hi! %s\n", name), "color": "gold"},
+				{"text": fmt.Sprintf("Access IP: %s\n", conn.RemoteAddr().String()), "color": "gray"},
+				{"text": fmt.Sprintf("Address: %s\n", accessDomain), "color": "gray"},
+				{"text": "You can't login to this server.", "color": "green"},
+			}
+			data, _ := json.Marshal(reason)
+			dataLen := writeVarInt(len(data))
+			conn.Write(newResponse(0x00, append(dataLen, data...)))
+			continue
+		}
+
+		// Ping
 		if packetId == 1 && dataLen > 0 {
 			payload := make([]byte, dataLen)
 			buf.Read(payload)
