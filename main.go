@@ -104,7 +104,6 @@ func NewSession(conn net.Conn, id int) {
 			continue
 		}
 
-		log.Println(packetId, dataLen, next)
 		// Handshake
 		if packetId == 0 && dataLen > 0 && next == Handshake {
 			protocolVer, _ = readVarInt(buf)
