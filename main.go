@@ -100,9 +100,6 @@ func NewSession(conn net.Conn, id int) {
 		packetId, packetIdLen := readVarInt(buf)
 
 		dataLen := length - packetIdLen
-		if dataLen == 0 {
-			continue
-		}
 
 		// Handshake
 		if packetId == 0 && dataLen > 0 && next == Handshake {
@@ -123,46 +120,6 @@ func NewSession(conn net.Conn, id int) {
 				next = Login
 			}
 
-			status := MinecraftServer{
-				Version: ServerVersion{
-					Name:     "How to looking here?",
-					Protocol: protocolVer,
-				},
-				Players: ServerPlayers{
-					Max:    0,
-					Online: -21263,
-					Sample: []ServerPlayer{
-						{
-							Name: "aatomu",
-							Id:   "c52fafa6-e223-4bdd-b884-b39f641a4cf4",
-						},
-					},
-				},
-				Description: []map[string]any{
-					{"text": "SERVER", "color": "gold", "bold": true},
-					{"text": " "},
-					{"text": "IS", "color": "red", "bold": true},
-					{"text": " "},
-					{"text": "SERVER\n", "color": "blue", "bold": true},
-					{"text": fmt.Sprintf("Time: %s", time.Now().Format("2006-01-02T15:04:05.00 UTC-07:00"))},
-				},
-			}
-
-			func() {
-				_, err := os.Stat("./icon.png")
-				if err == nil {
-					img, err := os.ReadFile("./icon.png")
-					if err != nil {
-						return
-					}
-
-					base := base64.StdEncoding.EncodeToString(img)
-					status.Favicon = fmt.Sprintf("data:image/png;base64,%s", base)
-				}
-			}()
-			data, _ := json.Marshal(status)
-			dataLen := writeVarInt(len(data))
-			conn.Write(newResponse(0, append(dataLen, data...)))
 			continue
 		}
 
